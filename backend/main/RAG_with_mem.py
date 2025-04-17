@@ -7,6 +7,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from fastapi.middleware.cors import CORSMiddleware
 import os
 from langchain_ollama import OllamaEmbeddings
+
 # Setup
 app = FastAPI()
 
@@ -22,15 +23,10 @@ app.add_middleware(
 llm = ChatOllama(model="gemma3:1b")
 embedding = OllamaEmbeddings(model="nomic-embed-text:latest")  # You must have this embedding model pulled
 
-
-from langchain_community.vectorstores import FAISS
-from langchain_core.documents import Document
-
-import os
-
-embedding = OllamaEmbeddings(model="nomic-embed-text:latest")
+# Path to FAISS index
 faiss_path = "chat_memory_faiss"
 
+# Load or create FAISS index
 if os.path.exists(os.path.join(faiss_path, "index.faiss")):
     print("Loading existing FAISS index...")
     vectorstore = FAISS.load_local(faiss_path, embeddings=embedding, allow_dangerous_deserialization=True)
@@ -44,15 +40,6 @@ else:
     vectorstore.delete([dummy_id])
     
     vectorstore.save_local(faiss_path)
-
-
-
-
-# Load or create FAISS index
-if os.path.exists(faiss_path):
-    vectorstore = FAISS.load_local(faiss_path, embedding, allow_dangerous_deserialization=True)
-else:
-    vectorstore = FAISS.from_documents([], embedding)
 
 # System prompt (not stored in vector DB)
 system_prompt = SystemMessage(content="You are a helpful AI Assistant. Answer the User's queries succinctly in one sentence.")
@@ -93,6 +80,7 @@ async def chat(req: ChatRequest):
 
 @app.get("/history")
 async def get_history():
+    # Retrieve the stored messages in history (only recent context)
     docs = vectorstore.similarity_search("", k=100)
     return [
         {"role": doc.metadata.get("role", "unknown"), "content": doc.page_content}
@@ -101,13 +89,36 @@ async def get_history():
 
 @app.post("/reset")
 async def reset_chat():
-    # Delete local FAISS store
-    if os.path.exists(faiss_path):
-        for file in os.listdir(faiss_path):
-            os.remove(os.path.join(faiss_path, file))
-        os.rmdir(faiss_path)
+    try:
+        # Check if the FAISS index directory exists and remove files
+        if os.path.exists(faiss_path):
+            print(f"Found FAISS directory, attempting to delete files in {faiss_path}")
+            
+            # Ensure the directory isn't empty before removing
+            files_in_directory = os.listdir(faiss_path)
+            if files_in_directory:
+                for file in files_in_directory:
+                    file_path = os.path.join(faiss_path, file)
+                    os.remove(file_path)
+                    print(f"Removed file: {file_path}")
+                os.rmdir(faiss_path)
+                print(f"FAISS directory deleted: {faiss_path}")
+            else:
+                print(f"FAISS directory is already empty.")
+        else:
+            print(f"No FAISS directory found at {faiss_path}. Skipping deletion.")
 
-    # Reinitialize empty vectorstore
-    global vectorstore
-    vectorstore = FAISS.from_documents([], embedding)
-    return {"message": "Chat memory has been reset."}
+        # Reinitialize empty vectorstore
+        print("Reinitializing vectorstore...")
+        global vectorstore
+        vectorstore = FAISS.from_documents([], embedding)
+        print("Vectorstore reinitialized.")
+
+        return {"message": "Chat memory has been reset."}
+    
+    except Exception as e:
+        print(f"Error during reset: {e}")
+        return {"message": f"Error resetting chat memory: {e}"}, 500
+
+
+
