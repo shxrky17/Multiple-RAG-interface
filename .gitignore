@@ -1,3 +1,4 @@
 .env
-
+/home/yash/Desktop/Langchain/backend/main/chat_memory_faiss
 node_modules/
+/home/yash/Desktop/Langchain/backend/main/__pycache__
